@@ -832,6 +832,50 @@ def plot_aa_swap_heatmap(
     )
 
 
+def plot_c_terminal_aa_swap_heatmap(
+    df,
+    *,
+    style=None,
+    ax=None,
+    output_path=None,
+    name=None,
+    aggfunc="mean",
+    value_col="score",
+    collapse_il=True,
+    vmin=None,
+    vmax=None,
+    annot=True,
+    show_groups=True,
+    title=None,
+    figsize=None,
+):
+    """Residue × residue heatmap of last-two-residue swaps ("...XY" vs "...YX").
+
+    Requires normalized ``peptide_1_O`` and ``peptide_2_O`` columns. Swap annotations
+    are recalculated for the C-terminus, even if the input already contains them.
+    """
+    _require(df, "peptide_1_O", "peptide_2_O", value_col)
+    pairs = annotate_terminal_swap(df, collapse_il=collapse_il, terminus="C")
+    if not (pairs["swap_aa_row"].notna() & pairs["swap_aa_col"].notna()).any():
+        raise ValueError("no last-two-residue swap pairs in the data")
+    return plot_aa_swap_heatmap(
+        pairs,
+        style=style,
+        ax=ax,
+        output_path=output_path,
+        name=name or f"c_terminal_aa_swap_{aggfunc}_heatmap",
+        aggfunc=aggfunc,
+        value_col=value_col,
+        collapse_il=collapse_il,
+        vmin=vmin,
+        vmax=vmax,
+        annot=annot,
+        show_groups=show_groups,
+        title=title,
+        figsize=figsize,
+    )
+
+
 def plot_swap_position_heatmap(
     df,
     *,

@@ -69,6 +69,7 @@ from .plots import (
     plot_aa_position_heatmap,
     plot_aa_position_violin,
     plot_aa_swap_heatmap,
+    plot_c_terminal_aa_swap_heatmap,
     plot_swap_position_heatmap,
     plot_ox_sub_distance,
     plot_swap_aa_vs_input,

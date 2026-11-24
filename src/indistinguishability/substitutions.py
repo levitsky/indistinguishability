@@ -91,9 +91,11 @@ def annotate_substitutions(scores_df):
     return pd.concat([scores_df.copy(), metrics], axis=1)
 
 
-def annotate_terminal_swap(scores_df, collapse_il=True, verbose=True):
-    """Flag pairs whose only difference is the first two residues having swapped places
-    ("XY..." vs "YX...") and label each with the unordered residue pair involved.
+def annotate_terminal_swap(scores_df, collapse_il=True, verbose=True, *, terminus="N"):
+    """Flag pairs whose only difference is a swap of the first or last two residues.
+
+    `terminus` is "N" (the default, "XY..." vs "YX...") or "C" ("...XY" vs
+    "...YX"). Label each swap with the unordered residue pair involved.
 
     Adds `is_swap` plus `swap_aa_row` / `swap_aa_col`: the two swapped residues ordered by
     their position in the grid order (row = later), so every pair lands in the lower triangle
@@ -109,8 +111,12 @@ def annotate_terminal_swap(scores_df, collapse_il=True, verbose=True):
     `swap_aa_row` is NaN for non-swap pairs and for residues outside the grid order, so
     filter on `swap_aa_row.notna()` before plotting.
     """
+    if terminus not in ("N", "C"):
+        raise ValueError(f"terminus must be 'N' or 'C', not {terminus!r}")
     p1 = scores_df["peptide_1_O"].astype(str)
     p2 = scores_df["peptide_2_O"].astype(str)
+    if terminus == "C":
+        p1, p2 = p1.str[::-1], p2.str[::-1]
     if collapse_il:
         n1, n2 = p1.str.replace("I", "L"), p2.str.replace("I", "L")
     else:
@@ -138,7 +144,8 @@ def annotate_terminal_swap(scores_df, collapse_il=True, verbose=True):
         n_equal = int((~is_swap & (n1 == n2)).sum())
         print(
             f"{len(scores_df)} pairs (collapse_il={collapse_il}): {int(is_swap.sum())} "
-            f"first-two-residue swaps, {int((~is_swap).sum())} not a swap (of which "
+            f"{'first' if terminus == 'N' else 'last'}-two-residue swaps, "
+            f"{int((~is_swap).sum())} not a swap (of which "
             f"{n_equal} are the same peptide under this comparison), {int(off_grid.sum())} "
             f"with a residue outside the grid, {int(row.notna().sum())} plottable"
         )

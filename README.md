@@ -42,7 +42,7 @@ python plotting.py --scores scores.tsv --threshold 0.7 --remove MO_IL \
 |---|---|
 | Distributions | `score_distribution`, `levenshtein_distribution`, `irt_diff_histogram`, `peptide_length` |
 | Score vs. features | `levenshtein_violin`, `feature_hexbin`, `binned_mean`, `score_by_combo`, `irt_ccs_hexbin` (needs CCS) |
-| Heatmaps | `heatmap_mean`, `heatmap_count`, `aa_position_heatmap`, `aa_swap_heatmap`, `swap_position_heatmap`, `ox_sub_distance` |
+| Heatmaps | `heatmap_mean`, `heatmap_count`, `aa_position_heatmap`, `aa_swap_heatmap`, `c_terminal_aa_swap_heatmap`, `swap_position_heatmap`, `ox_sub_distance` |
 | Other | `aa_position_violin`, `swap_aa_vs_input`, `mirror` (Koina; takes `pair=PEP1,PEP2` or `top=N`) |
 
 ## Python / notebooks
@@ -58,6 +58,25 @@ style = ind.get_style("paper", cmap_mean="magma")    # preset + overrides
 fig, ax = ind.plot_heatmap(df[df.score >= 0.7], rows="first_p_1", vmin=0.7, vmax=1,
                            style=style, output_path="figures")
 ```
+
+For a residue-by-residue heatmap of swaps at the last two positions, use
+`ind.plot_c_terminal_aa_swap_heatmap(df)` (or `--plot c_terminal_aa_swap_heatmap`).
+It accepts the same plotting options as `plot_aa_swap_heatmap`, including
+`aggfunc="count"` and `collapse_il=False`. Like the N-terminal plot, it expects
+normalized `peptide_1_O` and `peptide_2_O` columns. If you already have a
+DataFrame with `peptide 1` and `peptide 2`, prepare a copy as follows:
+
+```python
+plot_df = df.copy()
+for n in (1, 2):
+    plot_df[f"peptide_{n}_O"] = ind.normalise_mods(plot_df[f"peptide {n}"])
+fig, ax = ind.plot_c_terminal_aa_swap_heatmap(plot_df)
+```
+
+Only pairs differing by a swap of the last two residues are included. By default I
+and L are treated as equivalent across the entire peptide; use `collapse_il=False`
+to distinguish them. Normalize supported modification tags before plotting;
+pairs with unrecognized bracketed modifications cannot be classified.
 
 ## Layout
 

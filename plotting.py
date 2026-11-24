@@ -117,6 +117,7 @@ PLOTS = {
     "aa_position_heatmap": ind.plot_aa_position_heatmap,
     "aa_position_violin": ind.plot_aa_position_violin,
     "aa_swap_heatmap": ind.plot_aa_swap_heatmap,
+    "c_terminal_aa_swap_heatmap": ind.plot_c_terminal_aa_swap_heatmap,
     "swap_position_heatmap": ind.plot_swap_position_heatmap,
     "ox_sub_distance": ind.plot_ox_sub_distance,
     "swap_aa_vs_input": ind.plot_swap_aa_vs_input,
