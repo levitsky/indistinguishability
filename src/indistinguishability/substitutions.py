@@ -91,11 +91,26 @@ def annotate_substitutions(scores_df):
     return pd.concat([scores_df.copy(), metrics], axis=1)
 
 
+def _swapped_residues(p1, p2):
+    if len(p1) != len(p2) or "[" in p1 or "[" in p2:
+        return None, None
+    mismatches = []
+    for a, b in zip(p1, p2):
+        if a != b:
+            mismatches.append((a, b))
+            if len(mismatches) > 2:
+                return None, None
+    if len(mismatches) == 2 and mismatches[0] == mismatches[1][::-1]:
+        return mismatches[0]
+    return None, None
+
+
 def annotate_terminal_swap(scores_df, collapse_il=True, verbose=True, *, terminus="N"):
-    """Flag pairs whose only difference is a swap of the first or last two residues.
+    """Flag pairs whose only difference is a single two-residue swap.
 
     `terminus` is "N" (the default, "XY..." vs "YX...") or "C" ("...XY" vs
-    "...YX"). Label each swap with the unordered residue pair involved.
+    "...YX"), or "any" for swaps at any two positions, including nonadjacent ones.
+    Label each swap with the unordered residue pair involved.
 
     Adds `is_swap` plus `swap_aa_row` / `swap_aa_col`: the two swapped residues ordered by
     their position in the grid order (row = later), so every pair lands in the lower triangle
@@ -103,16 +118,15 @@ def annotate_terminal_swap(scores_df, collapse_il=True, verbose=True, *, terminu
 
     `collapse_il` switches the whole comparison, not just the axes. With it on, sequences are
     I->L-normalized first: I and L share a row/column, an I/L difference elsewhere in the
-    peptide does not break a swap, and an I<->L swap of the first two residues is not a swap
-    at all (the peptides are isobaric, hence the same peptide). With it off nothing is
-    normalized: I and L get their own rows/columns and an I/L difference anywhere breaks the
-    swap, so `is_swap` is strictly smaller than in the collapsed case.
+    peptide does not break a swap, and an I<->L swap is not a swap at all (the peptides
+    are isobaric, hence the same peptide). With it off nothing is normalized: I and L get
+    their own rows/columns and an extra I/L difference elsewhere breaks the swap.
 
     `swap_aa_row` is NaN for non-swap pairs and for residues outside the grid order, so
     filter on `swap_aa_row.notna()` before plotting.
     """
-    if terminus not in ("N", "C"):
-        raise ValueError(f"terminus must be 'N' or 'C', not {terminus!r}")
+    if terminus not in ("N", "C", "any"):
+        raise ValueError(f"terminus must be 'N', 'C', or 'any', not {terminus!r}")
     p1 = scores_df["peptide_1_O"].astype(str)
     p2 = scores_df["peptide_2_O"].astype(str)
     if terminus == "C":
@@ -121,18 +135,24 @@ def annotate_terminal_swap(scores_df, collapse_il=True, verbose=True, *, terminu
         n1, n2 = p1.str.replace("I", "L"), p2.str.replace("I", "L")
     else:
         n1, n2 = p1, p2
-    aa_1, aa_2 = n1.str[0], n1.str[1]
-    is_swap = (
-        ~p1.str.contains("[", regex=False)
-        & ~p2.str.contains("[", regex=False)
-        & (n1.str.len() == n2.str.len())
-        & (n1.str.len() >= 2)
-        & (aa_1 == n2.str[1])
-        & (aa_2 == n2.str[0])
-        & (aa_1 != aa_2)
-        & (n1.str[2:] == n2.str[2:])
-    )
-    x, y = aa_1.where(is_swap), aa_2.where(is_swap)
+    if terminus == "any":
+        residues = [_swapped_residues(a, b) for a, b in zip(n1, n2)]
+        x = pd.Series((a for a, _ in residues), index=scores_df.index, dtype=object)
+        y = pd.Series((b for _, b in residues), index=scores_df.index, dtype=object)
+        is_swap = x.notna()
+    else:
+        aa_1, aa_2 = n1.str[0], n1.str[1]
+        is_swap = (
+            ~p1.str.contains("[", regex=False)
+            & ~p2.str.contains("[", regex=False)
+            & (n1.str.len() == n2.str.len())
+            & (n1.str.len() >= 2)
+            & (aa_1 == n2.str[1])
+            & (aa_2 == n2.str[0])
+            & (aa_1 != aa_2)
+            & (n1.str[2:] == n2.str[2:])
+        )
+        x, y = aa_1.where(is_swap), aa_2.where(is_swap)
     order, _ = aa_grid_order(collapse_il)
     rank = {aa: i for i, aa in enumerate(order)}
     later_first = x.map(rank) >= y.map(rank)  # False for unknown residues (NaN rank)
@@ -142,9 +162,10 @@ def annotate_terminal_swap(scores_df, collapse_il=True, verbose=True, *, terminu
     row, col = row.mask(off_grid), col.mask(off_grid)
     if verbose:
         n_equal = int((~is_swap & (n1 == n2)).sum())
+        kind = {"N": "first-two-residue", "C": "last-two-residue", "any": "two-residue"}
         print(
             f"{len(scores_df)} pairs (collapse_il={collapse_il}): {int(is_swap.sum())} "
-            f"{'first' if terminus == 'N' else 'last'}-two-residue swaps, "
+            f"{kind[terminus]} swaps, "
             f"{int((~is_swap).sum())} not a swap (of which "
             f"{n_equal} are the same peptide under this comparison), {int(off_grid.sum())} "
             f"with a residue outside the grid, {int(row.notna().sum())} plottable"

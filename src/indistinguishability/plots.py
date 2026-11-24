@@ -14,6 +14,7 @@ Figures are returned, not closed, so they can be edited further. Close them your
 """
 
 from collections import Counter
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -744,6 +745,7 @@ def plot_aa_swap_heatmap(
     aggfunc="mean",
     value_col="score",
     collapse_il=True,
+    position="N",
     vmin=None,
     vmax=None,
     annot=True,
@@ -751,18 +753,39 @@ def plot_aa_swap_heatmap(
     title=None,
     figsize=None,
 ):
-    """Lower-triangle residue × residue heatmap of first-two-residue swaps ("XY..." vs
-    "YX..."). Runs `annotate_terminal_swap` itself when the swap columns are missing.
-    ``aggfunc="mean"`` colours by mean `value_col`, ``"count"`` by pair count (log)."""
+    """Lower-triangle residue × residue heatmap of single two-residue swaps.
+
+    ``position="N"`` (default) selects first-two swaps, ``"C"`` last-two swaps,
+    and ``"any"`` swaps at any two positions, adjacent or not. Each pair must
+    otherwise match, after optional I/L collapsing. With normalized peptide columns
+    present, swap labels are recalculated. For backward compatibility, N-terminal
+    precomputed labels can be used without peptide columns, but cannot be verified.
+    ``aggfunc="mean"`` colours by mean `value_col`, ``"count"`` by pair count (log).
+    """
     s = _style(style)
-    if "swap_aa_row" not in df.columns:
-        _require(df, "peptide_1_O", "peptide_2_O")
-        df = annotate_terminal_swap(df, collapse_il=collapse_il)
+    if position not in ("N", "C", "any"):
+        raise ValueError(f"position must be 'N', 'C', or 'any', not {position!r}")
+    peptide_cols = ("peptide_1_O", "peptide_2_O")
+    if (
+        position == "N"
+        and not any(col in df.columns for col in peptide_cols)
+        and all(col in df.columns for col in ("swap_aa_row", "swap_aa_col"))
+    ):
+        warnings.warn(
+            "Using precomputed swap labels without peptide sequences; "
+            "their position and collapse_il settings cannot be verified.",
+            UserWarning,
+            stacklevel=2,
+        )
+    else:
+        _require(df, *peptide_cols)
+        df = annotate_terminal_swap(df, collapse_il=collapse_il, terminus=position)
     _require(df, value_col)
     order, groups = aa_grid_order(collapse_il)
     pairs = df[df["swap_aa_row"].notna() & df["swap_aa_col"].notna()]
     if pairs.empty:
-        raise ValueError("no first-two-residue swap pairs in the data")
+        kind = {"N": "first-two-residue", "C": "last-two-residue", "any": "two-residue"}
+        raise ValueError(f"no {kind[position]} swap pairs in the data")
     unknown = sorted((set(pairs["swap_aa_row"]) | set(pairs["swap_aa_col"])) - set(order))
     if unknown:
         raise ValueError(
@@ -827,9 +850,12 @@ def plot_aa_swap_heatmap(
                 )
     if title and s.show_title:
         ax.set_title(title, fontsize=s.title_size, pad=30 if show_groups else 6)
-    return _finish(
-        fig, ax, s, output_path, name or f"aa_swap_{aggfunc}_heatmap", despine=False
+    default_name = (
+        f"aa_swap_{aggfunc}_heatmap"
+        if position == "N"
+        else f"{'c_terminal' if position == 'C' else 'any_position'}_aa_swap_{aggfunc}_heatmap"
     )
+    return _finish(fig, ax, s, output_path, name or default_name, despine=False)
 
 
 def plot_c_terminal_aa_swap_heatmap(
@@ -849,17 +875,13 @@ def plot_c_terminal_aa_swap_heatmap(
     title=None,
     figsize=None,
 ):
-    """Residue × residue heatmap of last-two-residue swaps ("...XY" vs "...YX").
+    """Compatibility wrapper for ``plot_aa_swap_heatmap(position="C")``.
 
     Requires normalized ``peptide_1_O`` and ``peptide_2_O`` columns. Swap annotations
     are recalculated for the C-terminus, even if the input already contains them.
     """
-    _require(df, "peptide_1_O", "peptide_2_O", value_col)
-    pairs = annotate_terminal_swap(df, collapse_il=collapse_il, terminus="C")
-    if not (pairs["swap_aa_row"].notna() & pairs["swap_aa_col"].notna()).any():
-        raise ValueError("no last-two-residue swap pairs in the data")
     return plot_aa_swap_heatmap(
-        pairs,
+        df,
         style=style,
         ax=ax,
         output_path=output_path,
@@ -867,6 +889,7 @@ def plot_c_terminal_aa_swap_heatmap(
         aggfunc=aggfunc,
         value_col=value_col,
         collapse_il=collapse_il,
+        position="C",
         vmin=vmin,
         vmax=vmax,
         annot=annot,

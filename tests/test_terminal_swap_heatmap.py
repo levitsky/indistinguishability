@@ -1,5 +1,7 @@
 import tempfile
 import unittest
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -94,6 +96,107 @@ class TerminalSwapHeatmapTests(unittest.TestCase):
         with patch("indistinguishability.plots.sns.heatmap", wraps=sns.heatmap) as heatmap:
             ind.plot_c_terminal_aa_swap_heatmap(df, show_groups=False)
         self.assertAlmostEqual(heatmap.call_args.args[0].loc["C", "O"], 0.7)
+
+    def test_any_position_classification(self):
+        df = pd.DataFrame(
+            {
+                "peptide_1_O": [
+                    "ACPEPT", "PEPTAC", "PACGT", "APCGT", "APCGT",
+                    "APCGT", "AC", "A", "AP[mod]C", "XAP", "ACG",
+                ],
+                "peptide_2_O": [
+                    "CAPEPT", "PEPTCA", "PCAGT", "CPAGT", "CPTGA",
+                    "CPCGT", "CA", "A", "CP[mod]A", "AXP", "CA",
+                ],
+            }
+        )
+        result = ind.annotate_terminal_swap(df, terminus="any", verbose=False)
+        self.assertEqual(
+            result["is_swap"].tolist(),
+            [True, True, True, True, False, False, True, False, False, True, False],
+        )
+        self.assertEqual((result.loc[2, "swap_aa_row"], result.loc[2, "swap_aa_col"]), ("C", "A"))
+        self.assertTrue(pd.isna(result.loc[9, "swap_aa_row"]))
+
+    def test_position_modes_recalculate_and_aggregate(self):
+        df = pd.DataFrame(
+            {
+                "peptide_1_O": ["ACPEPT", "PEPTAC", "PACGT", "APCGT"],
+                "peptide_2_O": ["CAPEPT", "PEPTCA", "PCAGT", "CPAGT"],
+                "score": [0.1, 0.3, 0.5, 0.9],
+                "swap_aa_row": ["C"] * 4,
+                "swap_aa_col": ["A"] * 4,
+            },
+            index=[3, 3, 5, 7],
+        )
+        original = df.copy(deep=True)
+        for position, expected in (("N", 0.1), ("C", 0.3), ("any", 0.45)):
+            with self.subTest(position=position):
+                with patch("indistinguishability.plots.sns.heatmap", wraps=sns.heatmap) as heatmap:
+                    ind.plot_aa_swap_heatmap(df, position=position, show_groups=False)
+                self.assertAlmostEqual(heatmap.call_args.args[0].loc["C", "A"], expected)
+        pd.testing.assert_frame_equal(df, original)
+
+    def test_any_position_il_collapse_and_count(self):
+        df = pd.DataFrame(
+            {
+                "peptide_1_O": ["IAPCG", "PLIQ", "PILQ"],
+                "peptide_2_O": ["LCPAG", "PILQ", "PLIQ"],
+                "score": [0.2, 0.4, 0.6],
+            }
+        )
+        collapsed = ind.annotate_terminal_swap(df, terminus="any", verbose=False)
+        separate = ind.annotate_terminal_swap(
+            df, terminus="any", collapse_il=False, verbose=False
+        )
+        self.assertEqual(collapsed["is_swap"].tolist(), [True, False, False])
+        self.assertEqual(separate["is_swap"].tolist(), [False, True, True])
+        with patch("indistinguishability.plots.sns.heatmap", wraps=sns.heatmap) as heatmap:
+            ind.plot_aa_swap_heatmap(
+                df, position="any", collapse_il=False, aggfunc="count", show_groups=False
+            )
+        self.assertEqual(heatmap.call_args.args[0].loc["L", "I"], 2)
+
+    def test_position_validation_and_legacy_annotations(self):
+        df = pd.DataFrame({"score": [0.4], "swap_aa_row": ["C"], "swap_aa_col": ["A"]})
+        with self.assertWarnsRegex(UserWarning, "cannot be verified"):
+            ind.plot_aa_swap_heatmap(df, show_groups=False)
+        for position in ("C", "any"):
+            with self.subTest(position=position), self.assertRaisesRegex(KeyError, "peptide_1_O"):
+                ind.plot_aa_swap_heatmap(df, position=position)
+        with self.assertRaisesRegex(ValueError, "position must"):
+            ind.plot_aa_swap_heatmap(df, position="invalid")
+        self.assertIn("position", plotting.plot_options("aa_swap_heatmap"))
+
+    def test_any_position_cli_and_output_name(self):
+        df = pd.DataFrame(
+            {"peptide_1_O": ["APCGT"], "peptide_2_O": ["CPAGT"], "score": [0.8]}
+        )
+        with tempfile.TemporaryDirectory() as output:
+            plotting.make_plot(
+                "aa_swap_heatmap", df, position="any", output_path=output, show_groups=False
+            )
+            self.assertTrue(Path(output, "any_position_aa_swap_mean_heatmap.png").is_file())
+
+    def test_cli_position_option_end_to_end(self):
+        df = pd.DataFrame(
+            {"peptide 1": ["APCGT"], "peptide 2": ["CPAGT"], "score": [0.8]}
+        )
+        with tempfile.TemporaryDirectory() as output:
+            scores = Path(output, "scores.tsv")
+            df.to_csv(scores, sep="\t", index=False)
+            result = subprocess.run(
+                [
+                    sys.executable, "plotting.py", "--scores", str(scores),
+                    "--plot", "aa_swap_heatmap", "--opt", "position=any",
+                    "--out", output,
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            self.assertIn("1 two-residue swaps", result.stdout)
+            self.assertTrue(Path(output, "any_position_aa_swap_mean_heatmap.png").is_file())
 
 
 if __name__ == "__main__":

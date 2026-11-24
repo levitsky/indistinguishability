@@ -59,24 +59,30 @@ fig, ax = ind.plot_heatmap(df[df.score >= 0.7], rows="first_p_1", vmin=0.7, vmax
                            style=style, output_path="figures")
 ```
 
-For a residue-by-residue heatmap of swaps at the last two positions, use
-`ind.plot_c_terminal_aa_swap_heatmap(df)` (or `--plot c_terminal_aa_swap_heatmap`).
-It accepts the same plotting options as `plot_aa_swap_heatmap`, including
-`aggfunc="count"` and `collapse_il=False`. Like the N-terminal plot, it expects
-normalized `peptide_1_O` and `peptide_2_O` columns. If you already have a
-DataFrame with `peptide 1` and `peptide 2`, prepare a copy as follows:
+For a residue-by-residue swap heatmap, `plot_aa_swap_heatmap` accepts
+`position="N"` (default, first two residues), `"C"` (last two residues), or
+`"any"` (two swapped residues anywhere, including nonadjacent positions). A pair
+must otherwise match. It accepts `aggfunc="count"` for pair counts or the default
+`"mean"` for mean scores. On the command line, use for example
+`--plot aa_swap_heatmap --opt position=C`.
+
+The plot expects normalized `peptide_1_O` and `peptide_2_O` columns. If you already
+have a DataFrame with `peptide 1` and `peptide 2`, prepare a copy as follows:
 
 ```python
 plot_df = df.copy()
 for n in (1, 2):
     plot_df[f"peptide_{n}_O"] = ind.normalise_mods(plot_df[f"peptide {n}"])
-fig, ax = ind.plot_c_terminal_aa_swap_heatmap(plot_df)
+fig, ax = ind.plot_aa_swap_heatmap(plot_df, position="C")
 ```
 
-Only pairs differing by a swap of the last two residues are included. By default I
-and L are treated as equivalent across the entire peptide; use `collapse_il=False`
-to distinguish them. Normalize supported modification tags before plotting;
-pairs with unrecognized bracketed modifications cannot be classified.
+By default I and L are treated as equivalent across the entire peptide; use
+`collapse_il=False` to distinguish them. Normalize supported modification tags before
+plotting; pairs with unrecognized bracketed modifications cannot be classified.
+Swap annotations are recalculated when sequences are present. For compatibility,
+N-terminal precomputed `swap_aa_row` and `swap_aa_col` can still be plotted without
+sequences, but their provenance and I/L settings cannot be verified.
+`plot_c_terminal_aa_swap_heatmap` and its CLI name remain as compatibility aliases.
 
 ## Layout
 
