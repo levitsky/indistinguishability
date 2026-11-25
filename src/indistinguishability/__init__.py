@@ -3,6 +3,7 @@
     import indistinguishability as ind
     df = ind.load_scores(scores_tsv="scores.tsv")
     # or: df = ind.load_scores(peptides="peptides.tsv", npy="scores.npy")
+    # paths can be swapped for a peptides DataFrame / an already-loaded score array
     style = ind.get_style("talk", cmap_mean="magma")
     fig, ax = ind.plot_aa_swap_heatmap(df, style=style, output_path="figures")
 """
@@ -38,6 +39,8 @@ from .loading import (
     VARIABLE_MOD_REPLACEMENTS,
     FIXED_MOD_REPLACEMENTS,
     VERBOSE_RENAMES,
+    load_scores_npy,
+    load_peptides_tsv,
     load_scores,
     combine_pep_score,
     combine_pep_scores_wide,

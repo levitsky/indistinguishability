@@ -5,6 +5,10 @@ Two input shapes are supported:
   * ``read_results`` — the verbose TSV ("new tool") with ``peptide 1``/``peptide 2`` columns.
 Both add the same enrichment columns (``_O`` sequences, Levenshtein, lengths, proline
 position, AA substitution classification).
+
+Wherever a scores ``.npy`` path is accepted, an already-loaded score array is accepted
+too, and wherever a peptides TSV path is accepted, an already-loaded peptides DataFrame
+is accepted too (see ``load_scores_npy`` / ``load_peptides_tsv``).
 """
 
 import os
@@ -28,6 +32,28 @@ VARIABLE_MOD_REPLACEMENTS = {"M[UNIMOD:35]": "O"}
 #: ``O``->``M`` join key used by ``get_peptide_type`` / ``annotate_pair_characteristics``
 #: would never match an unmodified peptide table.
 FIXED_MOD_REPLACEMENTS = {"C[UNIMOD:4]": "C"}
+
+
+def load_scores_npy(npy):
+    """Return a compact ``(i, j, score)`` score array, loading ``.npy`` paths on demand.
+
+    Every loader that takes a scores ``.npy`` path goes through this, so the same
+    call sites also accept an array that is already in memory.
+    """
+    if isinstance(npy, np.ndarray):
+        return npy
+    return np.load(npy)
+
+
+def load_peptides_tsv(peptides):
+    """Return a peptides table as a DataFrame, loading ``.tsv`` paths on demand.
+
+    Every loader that takes a peptides ``.tsv`` path goes through this, so the same
+    call sites also accept a DataFrame that is already in memory.
+    """
+    if isinstance(peptides, pd.DataFrame):
+        return peptides
+    return pd.read_csv(peptides, sep="\t")
 
 
 def normalise_mods(sequences):
@@ -84,8 +110,11 @@ def _enrich(scores_df):
 
 
 def combine_pep_score(path_np, path_peptide, include_ccs=False):
-    """Combine peptide scores from a numpy file with peptide information from a TSV file.
-    Numpy file contains the index of the peptides.
+    """Combine peptide scores from a numpy array with peptide information from a DataFrame.
+    Numpy array contains the index of the peptides.
+
+    `path_np` accepts a compact ``(i, j, score)`` array or the path to a ``.npy`` file;
+    `path_peptide` accepts a peptides DataFrame or the path to a TSV file.
 
     Parameters
     ----------
@@ -93,8 +122,8 @@ def combine_pep_score(path_np, path_peptide, include_ccs=False):
         If True, also include ccs_1 / ccs_2 (and ccs_diff) columns,
         pulled from the "ccs" column in the peptide TSV.
     """
-    scores = np.load(path_np)
-    peptides = pd.read_csv(path_peptide, sep="\t")
+    scores = load_scores_npy(path_np)
+    peptides = load_peptides_tsv(path_peptide)
     scores_df = pd.DataFrame(scores, columns=["i", "j", "score"])
 
     cols = ["peptide_sequences", "irt", "m/z", "precursor_charges"]
@@ -128,9 +157,9 @@ def combine_pep_scores_wide(model_paths, peptide_path, score_threshold=0.7):
     candidate ``(i, j)`` pairs (e.g. the ``similarity`` package's
     ``slurm/02_band_compare.slurm`` output across intensity models/instruments).
 
-    Loads each model's compact ``(i, j, score)`` ``.npy`` and aligns them on
-    a composite integer key ``i * npeptides + j`` — not row position (parallel
-    scoring workers do not guarantee row order across separate runs) and not
+    Loads each model's compact ``(i, j, score)`` ``.npy`` (or already-loaded array) and
+    aligns them on a composite integer key ``i * npeptides + j`` — not row position
+    (parallel scoring workers do not guarantee row order across separate runs) and not
     a string key (far too memory-heavy at hundreds of millions to billions of
     rows) — into one numeric-only wide table. From that table:
 
@@ -144,13 +173,15 @@ def combine_pep_scores_wide(model_paths, peptide_path, score_threshold=0.7):
 
     Parameters
     ----------
-    model_paths : dict[str, str or Path]
+    model_paths : dict[str, str or Path or numpy.ndarray]
         Maps a model/instrument label (e.g. ``"Prosit_2020_intensity_HCD__QE"``)
-        to that model's ``scores.npy`` path.
-    peptide_path : str or Path
-        Path to any ONE of the per-model ``peptides.tsv`` files — identical
-        across models, since it is built once from ``input.txt`` independent
-        of which intensity model/instrument was used.
+        to that model's ``scores.npy`` path or the already-loaded ``(i, j, score)``
+        array.
+    peptide_path : str or Path or pandas.DataFrame
+        Path to any ONE of the per-model ``peptides.tsv`` files, or the
+        already-loaded peptides DataFrame — identical across models, since it is
+        built once from ``input.txt`` independent of which intensity
+        model/instrument was used.
     score_threshold : float, default 0.7
         The project's indistinguishability cutoff (see ``CLAUDE.md``).
 
@@ -164,13 +195,13 @@ def combine_pep_scores_wide(model_paths, peptide_path, score_threshold=0.7):
         not flag or did not report the pair) plus the usual enrichment
         columns.
     """
-    peptides = pd.read_csv(peptide_path, sep="\t")
+    peptides = load_peptides_tsv(peptide_path)
     npeptides = len(peptides)
 
     score_columns = {}
     counts = {}
     for model, npy_path in model_paths.items():
-        scores = np.load(npy_path)
+        scores = load_scores_npy(npy_path)
         counts[model] = len(scores)
         key = scores["i"].astype(np.int64) * npeptides + scores["j"].astype(np.int64)
         score_columns[f"score_{model}"] = pd.Series(
@@ -219,14 +250,18 @@ def combine_pep_scores_wide(model_paths, peptide_path, score_threshold=0.7):
 
 
 def combine_filtered_pep_score_add_I(path_np, path_peptide):
-    """Combine peptide scores from a numpy file with peptide information from a TSV file.
-    Numpy file contains the index of the peptides."""
-    scores = np.load(path_np)
+    """Combine peptide scores from a numpy array with peptide information from a DataFrame.
+    Numpy array contains the index of the peptides.
+
+    `path_np` accepts a compact ``(i, j, score)`` array or the path to a ``.npy`` file;
+    `path_peptide` accepts a peptides DataFrame or the path to a TSV file.
+    """
+    scores = load_scores_npy(path_np)
     # This peptides table is a *filtered* subset: its "Unnamed: 0" column holds the
     # original peptide row-numbers that the .npy i/j indices refer to. We must look up
     # by that label (via the index), NOT by position — positions no longer line up
     # once rows have been filtered out.
-    peptides = pd.read_csv(path_peptide, sep="\t")
+    peptides = load_peptides_tsv(path_peptide)
     if "Unnamed: 0" in peptides.columns:
         peptides = peptides.set_index("Unnamed: 0")
         peptides.index.name = None
@@ -296,14 +331,18 @@ def combine_filtered_pep_score_add_I(path_np, path_peptide):
 
 
 def combine_filtered_pep_score(path_np, path_peptide):
-    """Combine peptide scores from a numpy file with peptide information from a TSV file.
-    Numpy file contains the index of the peptides."""
-    scores = np.load(path_np)
+    """Combine peptide scores from a numpy array with peptide information from a DataFrame.
+    Numpy array contains the index of the peptides.
+
+    `path_np` accepts a compact ``(i, j, score)`` array or the path to a ``.npy`` file;
+    `path_peptide` accepts a peptides DataFrame or the path to a TSV file.
+    """
+    scores = load_scores_npy(path_np)
     # This peptides table is a *filtered* subset: its "Unnamed: 0" column holds the
     # original peptide row-numbers that the .npy i/j indices refer to. We must look up
     # by that label (via the index), NOT by position — positions no longer line up
     # once rows have been filtered out.
-    peptides = pd.read_csv(path_peptide, sep="\t")
+    peptides = load_peptides_tsv(path_peptide)
     if "Unnamed: 0" in peptides.columns:
         peptides = peptides.set_index("Unnamed: 0")
         peptides.index.name = None
@@ -463,10 +502,37 @@ def lookup_peptide_rows(
     ``peptides.tsv`` is 7.3 GB, which the other loaders' plain ``read_csv`` cannot handle).
     Returns a DataFrame indexed by row number.
 
+    `path_peptide` accepts a peptides DataFrame too; it is selected from directly instead
+    of being streamed.
+
     `cache_path` makes the scan a one-off: the extracted rows are written there as a TSV and
     re-read on later calls, and a rescan is triggered only if the cache is missing indices.
     """
     wanted = {int(i) for i in indices}
+    if isinstance(path_peptide, pd.DataFrame):
+        if cache_path and os.path.exists(cache_path):
+            cached = pd.read_csv(cache_path, sep="\t", index_col="index")
+            missing = wanted - set(cached.index)
+            if not missing:
+                return cached.loc[sorted(wanted)]
+        available = set(path_peptide.index)
+        found = sorted(wanted & available)
+        missing_cols = [c for c in cols if c not in path_peptide.columns]
+        if missing_cols:
+            raise ValueError(f"cols not found in the peptides table: {missing_cols}")
+        # keep the table's own column order, like read_csv(usecols=...) does
+        out = path_peptide.loc[found, [c for c in path_peptide.columns if c in cols]].copy()
+        out.index = found
+        out.index.name = "index"
+        n_found = len(out)
+        if n_found < len(wanted):
+            print(
+                f"Only {n_found} of {len(wanted)} indices found; the peptide table has "
+                f"{len(path_peptide)} rows"
+            )
+        if cache_path:
+            out.to_csv(cache_path, sep="\t")
+        return out
     if cache_path and os.path.exists(cache_path):
         cached = pd.read_csv(cache_path, sep="\t", index_col="index")
         missing = wanted - set(cached.index)
@@ -579,7 +645,8 @@ def load_scores(
     via `read_results`) **or** `peptides` + `npy` (``peptides.tsv`` + compact ``(i, j,
     score)`` array, via `combine_pep_score`). The verbose columns are renamed to the compact
     loader's names (``peptide_1``, ``irt_1``, ``m/z_1``, ``charge_1``, ...), so the result
-    has the same columns whichever input was used.
+    has the same columns whichever input was used. `peptides` and `npy` each accept either
+    a path or the already-loaded DataFrame / array.
 
     `filtered=True` uses `combine_filtered_pep_score`, which looks peptides up by their
     original row label: required when ``peptides.tsv`` is a filtered subset, where
