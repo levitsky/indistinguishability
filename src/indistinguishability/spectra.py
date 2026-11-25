@@ -77,7 +77,26 @@ def koina_to_spectrum_utils(pred: dict, peptide: str, charge: int):
         ion_types="by",
         max_ion_charge=charge,
     )
+    # A peak can match several fragments within the tolerance (e.g. y2 and y4^2 at
+    # 272.17); the plot uses the first, so put the closest mass match first.
+    for interp in spec.annotation:
+        interp.fragment_annotations.sort(
+            key=lambda a: abs(a.mz_delta[0]) if a.mz_delta else 0
+        )
     return spec
+
+
+def _ion_label(annotation):
+    """b/y label with charge as '+' marks (``y2+``, ``y6++``); blank for isotopes, neutral
+    losses and unknowns. spectrum_utils' default only labels charge 1, leaving
+    higher-charge peaks coloured but unlabelled."""
+    if (
+        annotation.ion_type[0] not in "by"
+        or annotation.neutral_loss is not None
+        or annotation.isotope != 0
+    ):
+        return ""
+    return f"{annotation.ion_type}{'+' * annotation.charge}"
 
 
 def plot_mirror(peptide_top, peptide_bottom, charge=2, ce=30, *, style=None, ax=None,
@@ -94,7 +113,7 @@ def plot_mirror(peptide_top, peptide_bottom, charge=2, ce=30, *, style=None, ax=
     spec2 = koina_to_spectrum_utils(pred2, peptide_bottom, charge)
     fig, ax = new_axes(s, ax, figsize)
     sup.colors.update(ion_colors or ION_COLORS)
-    sup.mirror(spec1, spec2, ax=ax)
+    sup.mirror(spec1, spec2, spectrum_kws={"annot_fmt": _ion_label}, ax=ax)
     ax.spines[["right", "top"]].set_visible(False)
     if s.show_title:
         ax.set_title(title or f"{peptide_top} vs {peptide_bottom} ({charge}+)",
